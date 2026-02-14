@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COLFRUTAS S.A.S - Firmador</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body, html { height: 100%; margin: 0; background-color: #f3f4f1; font-family: sans-serif; }
+        #upload-screen { display: flex; flex-direction: column; height: 100vh; width: 100%; }
+        .header-simple { background: white; padding: 1rem 2rem; border-bottom: 1px solid #e5e7eb; }
+        .upload-container { flex: 1; display: flex; align-items: center; justify-content: center; }
+        .upload-box { background: white; padding: 3rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center; width: 450px; }
+        #editor-screen { display: none; height: 100vh; }
+        .sidebar { width: 300px; height: 100vh; background: white; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; padding: 1.5rem; position: fixed; left: 0; top: 0; }
+        .main-content { margin-left: 300px; flex: 1; display: flex; flex-direction: column; align-items: center; padding: 20px; overflow-y: auto; height: 100vh; }
+        #pdf-container { position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.1); background: white; line-height: 0; margin-top: 10px; display: inline-block; }
+        #sig-wrapper { position: absolute; cursor: move; border: 2px dashed #3b82f6; display: none; z-index: 100; padding: 0; box-sizing: content-box; }
+        #sig-wrapper img { width: 100%; height: 100%; pointer-events: none; display: block; }
+        #resizer { width: 12px; height: 12px; background: #3b82f6; position: absolute; right: -6px; bottom: -6px; cursor: nwse-resize; border-radius: 50%; border: 2px solid white; }
+        .card { background: white; border-radius: 8px; border: 1px solid #e5e7eb; padding: 1rem; margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+
+    <div id="upload-screen">
+        <div class="header-simple"><h1 class="font-bold text-gray-700 text-lg">COLFRUTAS</h1></div>
+        <div class="upload-container">
+            <div class="upload-box">
+                <h2 class="text-2xl font-bold mb-6">Sube tu PDF</h2>
+                <div class="mb-6"><i class="fa-solid fa-cloud-arrow-up text-5xl text-gray-400"></i></div>
+                <button onclick="document.getElementById('pdfInput').click()" class="bg-green-500 text-white px-8 py-2 rounded-md font-medium hover:bg-green-600 transition">Buscar Archivos</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="editor-screen">
+        <aside class="sidebar">
+            <div class="flex items-center mb-8">
+                <div class="w-8 h-8 bg-orange-400 rounded-full mr-2"></div>
+                <h1 class="font-bold text-gray-700 text-lg uppercase">COLFRUTAS S.A.S</h1>
+            </div>
+            <div class="card">
+                <h3 class="text-xs font-bold text-gray-400 mb-3 uppercase italic">🖋️ Firma</h3>
+                <div class="bg-gray-50 rounded border p-2 mb-3 min-h-[100px] flex items-center justify-center">
+                    <img id="sigPreviewSide" class="max-h-24 hidden" />
+                    <span id="noSigText" class="text-xs text-gray-400">Sin firma</span>
+                </div>
+                <button onclick="document.getElementById('sigInput').click()" class="w-full py-2 text-sm bg-gray-50 rounded-lg border hover:bg-gray-100 transition">Cambiar Firma</button>
+            </div>
+            <div class="card">
+                <h3 class="text-xs font-bold text-gray-400 mb-3 uppercase italic">➕ Acciones</h3>
+                <button onclick="showSignatureOnPdf()" class="w-full py-3 bg-green-500 text-white rounded-lg font-medium mb-2 hover:bg-green-600 transition">Añadir Firma</button>
+                <button id="stampBtn" onclick="enableGlobalStamp()" class="w-full py-2 bg-gray-100 text-gray-400 rounded-lg text-sm flex items-center justify-center cursor-not-allowed border">Estampar en Todas</button>
+            </div>
+            <div class="mt-auto">
+                <button id="downloadBtn" onclick="processAndDownload()" disabled class="w-full py-3 bg-green-500 text-white rounded-lg font-bold mb-2 opacity-50 cursor-not-allowed">Guardar y Descargar</button>
+                <button onclick="goToUpload()" class="w-full py-2 bg-gray-50 rounded-lg text-sm border hover:bg-gray-100">Cambiar PDF</button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div id="paginator" class="flex items-center space-x-6 mb-4 bg-white px-6 py-2 rounded-full shadow-sm hidden">
+                <button onclick="changePage(-1)" class="text-gray-400 hover:text-green-500"><i class="fa-solid fa-chevron-left"></i></button>
+                <span class="text-sm font-medium text-gray-600">Página <span id="pageNum">1</span> de <span id="pageCount">0</span></span>
+                <button onclick="changePage(1)" class="text-gray-400 hover:text-green-500"><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
+            <div id="pdf-container">
+                <canvas id="pdf-canvas"></canvas>
+                <div id="sig-wrapper"><img id="sig-img" src=""><div id="resizer"></div></div>
+            </div>
+        </main>
+    </div>
+
+    <input type="file" id="pdfInput" accept=".pdf" class="hidden">
+    <input type="file" id="sigInput" accept="image/*" class="hidden">
+
+    <script>
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        let globalPdfBytes = null, globalSigBytes = null, sigMimeType = '', pdfJSInstance = null, currentPage = 1, originalFileName = "Documento";
+
+        window.onload = () => {
+            const savedSig = localStorage.getItem('col_sig'), savedMime = localStorage.getItem('col_mime');
+            if (savedSig) { sigMimeType = savedMime; displaySignature(savedSig); }
+        };
+
+        function goToUpload() { document.getElementById('upload-screen').style.display = 'flex'; document.getElementById('editor-screen').style.display = 'none'; }
+        function goToEditor() { document.getElementById('upload-screen').style.display = 'none'; document.getElementById('editor-screen').style.display = 'block'; }
+
+        document.getElementById('pdfInput').onchange = async (e) => {
+            const file = e.target.files[0]; if (!file) return;
+            originalFileName = file.name.replace(/\.[^/.]+$/, "");
+            const reader = new FileReader();
+            reader.onload = async (ev) => {
+                globalPdfBytes = new Uint8Array(ev.target.result);
+                pdfJSInstance = await pdfjsLib.getDocument({data: globalPdfBytes}).promise;
+                document.getElementById('pageCount').innerText = pdfJSInstance.numPages;
+                document.getElementById('paginator').classList.remove('hidden');
+                document.getElementById('sig-wrapper').style.display = 'none';
+                goToEditor(); renderPage(1);
+            };
+            reader.readAsArrayBuffer(file);
+        };
+
+        async function renderPage(num) {
+            const page = await pdfJSInstance.getPage(num);
+            const container = document.querySelector('.main-content');
+            const unscaledViewport = page.getViewport({scale: 1});
+            const scale = Math.min((container.clientWidth - 80) / unscaledViewport.width, (container.clientHeight - 120) / unscaledViewport.height) * 1.1;
+            const viewport = page.getViewport({scale: scale});
+            const canvas = document.getElementById('pdf-canvas');
+            const context = canvas.getContext('2d');
+            canvas.height = viewport.height; canvas.width = viewport.width;
+            await page.render({canvasContext: context, viewport: viewport}).promise;
+            currentPage = num; document.getElementById('pageNum').innerText = num;
+        }
+
+        function changePage(delta) { 
+            const newPage = currentPage + delta; 
+            if (newPage >= 1 && newPage <= pdfJSInstance.numPages) renderPage(newPage); 
+        }
+
+        document.getElementById('sigInput').onchange = (e) => {
+            const file = e.target.files[0]; if (!file) return;
+            sigMimeType = file.type;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                localStorage.setItem('col_sig', ev.target.result);
+                localStorage.setItem('col_mime', sigMimeType);
+                displaySignature(ev.target.result);
+            };
+            reader.readAsDataURL(file);
+        };
+
+        async function displaySignature(dataUrl) {
+            document.getElementById('sigPreviewSide').src = dataUrl;
+            document.getElementById('sigPreviewSide').classList.remove('hidden');
+            document.getElementById('noSigText').classList.add('hidden');
+            document.getElementById('sig-img').src = dataUrl;
+            const res = await fetch(dataUrl); globalSigBytes = await res.arrayBuffer();
+        }
+
+        function showSignatureOnPdf() {
+            if (!globalSigBytes) return;
+            const wrapper = document.getElementById('sig-wrapper');
+            wrapper.style.display = 'block'; wrapper.style.width = '150px';
+            wrapper.style.top = '20px'; wrapper.style.left = '20px';
+            const btn = document.getElementById('stampBtn');
+            btn.classList.remove('text-gray-400', 'cursor-not-allowed'); btn.classList.add('text-blue-600', 'cursor-pointer');
+        }
+
+        function enableGlobalStamp() {
+            const btn = document.getElementById('downloadBtn');
+            btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+
+        const wrapper = document.getElementById('sig-wrapper'), resizer = document.getElementById('resizer');
+        let isDragging = false, isResizing = false, startX, startY, startW;
+        wrapper.onmousedown = (e) => { if(e.target !== resizer) { isDragging = true; startX = e.clientX - wrapper.offsetLeft; startY = e.clientY - wrapper.offsetTop; } };
+        resizer.onmousedown = (e) => { isResizing = true; e.stopPropagation(); startW = wrapper.offsetWidth; startX = e.clientX; };
+        document.onmousemove = (e) => {
+            if (isDragging) { wrapper.style.left = Math.max(0, e.clientX - startX) + 'px'; wrapper.style.top = Math.max(0, e.clientY - startY) + 'px'; }
+            if (isResizing) { wrapper.style.width = Math.max(30, startW + (e.clientX - startX)) + 'px'; }
+        };
+        document.onmouseup = () => { isDragging = false; isResizing = false; };
+
+        // LÓGICA DE DESCARGA CON POSICIÓN MATEMÁTICA EXACTA
+        async function processAndDownload() {
+            try {
+                const pdfDoc = await PDFLib.PDFDocument.load(globalPdfBytes);
+                const sigImage = sigMimeType.includes('png') ? await pdfDoc.embedPng(globalSigBytes) : await pdfDoc.embedJpg(globalSigBytes);
+                const pages = pdfDoc.getPages();
+                const canvas = document.getElementById('pdf-canvas');
+                
+                // 1. Obtener dimensiones reales de la primera página del PDF
+                const { width: pdfPageWidth, height: pdfPageHeight } = pages[0].getSize();
+                
+                // 2. Calcular la relación exacta entre lo que ves (Canvas) y la realidad (PDF)
+                const scaleFactor = pdfPageWidth / canvas.width;
+
+                // 3. Convertir coordenadas del Canvas a coordenadas del PDF
+                const finalWidth = wrapper.offsetWidth * scaleFactor;
+                const finalHeight = wrapper.offsetHeight * scaleFactor;
+                const finalX = parseFloat(wrapper.style.left) * scaleFactor;
+                
+                // El PDF usa el origen (0,0) en la esquina INFERIOR izquierda. 
+                // Invertimos la coordenada Y para que coincida con la pantalla.
+                const finalY = pdfPageHeight - (parseFloat(wrapper.style.top) * scaleFactor) - finalHeight;
+
+                pages.forEach(p => {
+                    p.drawImage(sigImage, {
+                        x: finalX,
+                        y: finalY,
+                        width: finalWidth,
+                        height: finalHeight
+                    });
+                });
+
+                const pdfData = await pdfDoc.save();
+                const blob = new Blob([pdfData], { type: 'application/pdf' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `${originalFileName}_Firmado.pdf`;
+                link.click();
+            } catch (err) { console.error("Error al descargar:", err); }
+        }
+    </script>
+</body>
+</html>

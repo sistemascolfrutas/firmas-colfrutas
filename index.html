@@ -62,6 +62,11 @@
         <div class="card">
             <h3 class="text-xs font-bold text-gray-400 mb-3 uppercase italic">➕ Acciones</h3>
             <button onclick="showSignatureOnPdf()" class="w-full py-3 bg-green-500 text-white rounded-lg font-medium mb-2 hover:bg-green-600 transition">Añadir Firma</button>
+
+            <!-- NUEVO BOTÓN -->
+            <button onclick="stampAllSignatures()" class="w-full py-3 bg-blue-500 text-white rounded-lg font-medium hover:bg-blue-600 transition">
+                Estampar en todas
+            </button>
         </div>
 
         <div class="mt-auto">
@@ -96,20 +101,21 @@ let globalPdfBytes = null,
     originalFileName = "Documento";
 
 let signatures = [];
-
-window.onload = () => {
-    const savedSig = localStorage.getItem('col_sig'),
-          savedMime = localStorage.getItem('col_mime');
-    if (savedSig) {
-        sigMimeType = savedMime;
-        displaySignature(savedSig);
-    }
-};
+let stampedPdfBytes = null;
 
 function goToUpload() {
     document.getElementById('upload-screen').style.display = 'flex';
     document.getElementById('editor-screen').style.display = 'none';
+
+    document.querySelectorAll('.sig-item').forEach(el => el.remove());
+
     signatures = [];
+    stampedPdfBytes = null;
+    globalPdfBytes = null;
+
+    const btn = document.getElementById('downloadBtn');
+    btn.disabled = true;
+    btn.classList.add('opacity-50', 'cursor-not-allowed');
 }
 
 function goToEditor() {
@@ -173,23 +179,17 @@ document.getElementById('sigInput').onchange = (e) => {
     sigMimeType = file.type;
     const reader = new FileReader();
 
-    reader.onload = (ev) => {
-        localStorage.setItem('col_sig', ev.target.result);
-        localStorage.setItem('col_mime', sigMimeType);
-        displaySignature(ev.target.result);
+    reader.onload = async (ev) => {
+        document.getElementById('sigPreviewSide').src = ev.target.result;
+        document.getElementById('sigPreviewSide').classList.remove('hidden');
+        document.getElementById('noSigText').classList.add('hidden');
+
+        const res = await fetch(ev.target.result);
+        globalSigBytes = await res.arrayBuffer();
     };
 
     reader.readAsDataURL(file);
 };
-
-async function displaySignature(dataUrl) {
-    document.getElementById('sigPreviewSide').src = dataUrl;
-    document.getElementById('sigPreviewSide').classList.remove('hidden');
-    document.getElementById('noSigText').classList.add('hidden');
-
-    const res = await fetch(dataUrl);
-    globalSigBytes = await res.arrayBuffer();
-}
 
 function showSignatureOnPdf() {
     if (!globalSigBytes) return;
@@ -219,10 +219,6 @@ function showSignatureOnPdf() {
         bytes: globalSigBytes,
         mime: sigMimeType
     });
-
-    const btn = document.getElementById('downloadBtn');
-    btn.disabled = false;
-    btn.classList.remove('opacity-50', 'cursor-not-allowed');
 }
 
 function makeInteractive(wrapper, resizer) {
@@ -261,40 +257,56 @@ function makeInteractive(wrapper, resizer) {
     });
 }
 
+async function stampAllSignatures() {
+    if (!globalPdfBytes || signatures.length === 0) return;
+
+    const pdfDoc = await PDFLib.PDFDocument.load(globalPdfBytes);
+    const pages = pdfDoc.getPages();
+    const canvas = document.getElementById('pdf-canvas');
+
+    const { width: pdfPageWidth, height: pdfPageHeight } = pages[0].getSize();
+    const scaleFactor = pdfPageWidth / canvas.width;
+
+    for (let sig of signatures) {
+
+        const sigImage = sig.mime.includes('png')
+            ? await pdfDoc.embedPng(sig.bytes)
+            : await pdfDoc.embedJpg(sig.bytes);
+
+        const wrapper = sig.element;
+
+        const finalWidth = wrapper.offsetWidth * scaleFactor;
+        const finalHeight = wrapper.offsetHeight * scaleFactor;
+        const finalX = parseFloat(wrapper.style.left) * scaleFactor;
+        const finalY = pdfPageHeight - (parseFloat(wrapper.style.top) * scaleFactor) - finalHeight;
+
+        pages.forEach(p => {
+            p.drawImage(sigImage, {
+                x: finalX,
+                y: finalY,
+                width: finalWidth,
+                height: finalHeight
+            });
+        });
+    }
+
+    stampedPdfBytes = await pdfDoc.save();
+
+    const btn = document.getElementById('downloadBtn');
+    btn.disabled = false;
+    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+}
+
 async function processAndDownload() {
     try {
-        const pdfDoc = await PDFLib.PDFDocument.load(globalPdfBytes);
-        const pages = pdfDoc.getPages();
-        const canvas = document.getElementById('pdf-canvas');
 
-        const { width: pdfPageWidth, height: pdfPageHeight } = pages[0].getSize();
-        const scaleFactor = pdfPageWidth / canvas.width;
-
-        for (let sig of signatures) {
-
-            const sigImage = sig.mime.includes('png')
-                ? await pdfDoc.embedPng(sig.bytes)
-                : await pdfDoc.embedJpg(sig.bytes);
-
-            const wrapper = sig.element;
-
-            const finalWidth = wrapper.offsetWidth * scaleFactor;
-            const finalHeight = wrapper.offsetHeight * scaleFactor;
-            const finalX = parseFloat(wrapper.style.left) * scaleFactor;
-            const finalY = pdfPageHeight - (parseFloat(wrapper.style.top) * scaleFactor) - finalHeight;
-
-            pages.forEach(p => {
-                p.drawImage(sigImage, {
-                    x: finalX,
-                    y: finalY,
-                    width: finalWidth,
-                    height: finalHeight
-                });
-            });
+        if (!stampedPdfBytes) {
+            await stampAllSignatures();
         }
 
-        const pdfData = await pdfDoc.save();
-        const blob = new Blob([pdfData], { type: 'application/pdf' });
+        if (!stampedPdfBytes) return;
+
+        const blob = new Blob([stampedPdfBytes], { type: 'application/pdf' });
 
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
